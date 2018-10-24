@@ -27,3 +27,14 @@ Tool built in Go for verifying the integrity of GitHub web hooks and providing t
     List hooks to be destroyed before confirmation.
 - `-u`
     Include untriggered webhooks when destroying.
+
+### Repos JSON file syntax
+```
+{
+    "repos": [
+        {
+            "name": "eimlav/api-testing"
+        }
+    ]
+}
+```
