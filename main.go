@@ -73,6 +73,7 @@ type WebHook struct {
 func (w WebHook) StatusToString() (status string) {
 	// Required for edge cases where w.Config.URL is empty
 	var url string
+
 	if w.Config.URL != "" {
 		url = w.Config.URL
 	} else {
@@ -90,7 +91,6 @@ func (w WebHook) StatusToString() (status string) {
 	default:
 		status += fmt.Sprintf("%s | %s", Red(codeString), Red(w.LastResponse.Message))
 	}
-
 	return status
 }
 
@@ -146,7 +146,6 @@ func makeAPIRequest(requestURL, httpType string, output interface{}) error {
 	if response.StatusCode != 200 && response.StatusCode != 204 {
 		return fmt.Errorf("%s %d %s", "HTTP Status Code", response.StatusCode, "returned")
 	}
-
 	return json.NewDecoder(response.Body).Decode(output)
 }
 
@@ -166,7 +165,6 @@ func getWebHooks(repoName string) (WebHooks, error) {
 	if err != nil {
 		return WebHooks{}, fmt.Errorf("API Request Error : %s encountered error : %s", repoName, err)
 	}
-
 	return webHooks, nil
 }
 
@@ -181,8 +179,10 @@ func executeCheck() error {
 	// For each repo read in...
 	for _, repo := range reposContainer.Repos {
 		var duplicateHooksIndexFound []int
+
 		// Print name of repo
 		fmt.Println(Bold(Magenta(repo.Name)))
+
 		// Get web hooks
 		webHooks, err := getWebHooks(repo.Name)
 		if err != nil {
@@ -232,9 +232,10 @@ func executeCheck() error {
 // @return []string - Contains each type as a string
 // @return error
 func validateTypesFlag(typesFlag string) ([]string, error) {
-	types := strings.Split(typesFlag, ",")
 	var failedTypes []string
 	r, _ := regexp.Compile("\\d{3}|\\d[xX][xX]|\\d\\d[xX]")
+	types := strings.Split(typesFlag, ",")
+
 	for index, aType := range types {
 		if !r.MatchString(aType) {
 			failedTypes = append(failedTypes, aType)
@@ -245,7 +246,6 @@ func validateTypesFlag(typesFlag string) ([]string, error) {
 	if len(failedTypes) > 0 {
 		return types, fmt.Errorf("Invalid types found: %s", failedTypes)
 	}
-
 	return types, nil
 }
 
@@ -255,6 +255,7 @@ func validateTypesFlag(typesFlag string) ([]string, error) {
 // @return string - Regex string
 func convertTypesToRegex(types []string) string {
 	var newTypes []string
+
 	for _, aType := range types {
 		newTypes = append(newTypes, strings.Replace(aType, "X", "\\d", -1))
 	}
@@ -300,136 +301,6 @@ func uniqueAppend(array []string, input string) []string {
 	return append(array, input)
 }
 
-// Executes the destroy process of webhooks
-// @arg typesFlag string
-// @arg duplicatesFlag bool
-// @arg untriggeredFlag bool
-// @arg listHooksToDestroyFlag bool
-// @return error
-func executeDestroy(typesFlag string, duplicatesFlag, untriggeredFlag, listHooksToDestroyFlag bool) error {
-	fmt.Println(Bold(Brown("* * * DESTROY * * *")))
-
-	// Validate types
-	types, err := validateTypesFlag(typesFlag)
-	if err != nil {
-		printError("Invalid type options specified:", err)
-	}
-
-	var duplicatesOutput string
-	if duplicatesFlag {
-		duplicatesOutput = "and duplicates"
-	}
-	fmt.Printf("%s %s %s\n", Bold(Gray("Webhooks to be destroyed with HTTP status codes matching")), Bold(Brown(types)), Bold(Brown(duplicatesOutput)))
-
-	typesRegexString := convertTypesToRegex(types)
-
-	fmt.Println(Bold(Gray("Checking GitHub repos for validity of webhooks and tagging those to destroy...\n")))
-
-	// Complete output of hooks to destroy
-	var totalOutput string
-	// Array to store ID of all hooks to be destroyed
-	var hooksToDestroy []string
-	var temparray []string
-	// For each repo..
-	for _, repo := range reposContainer.Repos {
-		// Array containing indexes of duplicate hooks
-		var duplicateHooksIndexFound []int
-		// Print name of repo
-		fmt.Println(Bold(Magenta(repo.Name)))
-		totalOutput += fmt.Sprint(Bold(Magenta(repo.Name)), "\n")
-
-		// Get web hooks
-		webHooks, err := getWebHooks(repo.Name)
-		if err != nil {
-			fmt.Printf("%s %s\n\n", Red("Failed to retrieve web hooks:"), Red(err))
-			continue
-		}
-
-		// Check last_response of each web hook
-		for index, hook := range webHooks.Hooks {
-			output := hook.StatusToString()
-			codeString := strings.ToUpper(strconv.Itoa(hook.LastResponse.Code))
-
-			// Check for duplicates
-			foundDuplicate := false
-			for dIndex, dHook := range webHooks.Hooks {
-				if dIndex == index {
-					continue
-				}
-				if hook.Config.URL != "" && hook.Config.URL == dHook.Config.URL {
-					if !contains(duplicateHooksIndexFound, dIndex) {
-						if duplicatesFlag {
-							hooksToDestroy = uniqueAppend(hooksToDestroy, hook.URL)
-						}
-						duplicateHooksIndexFound = append(duplicateHooksIndexFound, index)
-						foundDuplicate = true
-					}
-				}
-			}
-			if foundDuplicate {
-				output += fmt.Sprintf("%s", Cyan(" [DUPLICATE] "))
-			}
-
-			// Check if codeString matches any types supplied
-			typesRegex, err := regexp.Compile(typesRegexString)
-			if err != nil {
-				fmt.Printf("%s %s\n", Red("Error compiling types regex"), Red(err))
-				continue
-			}
-			if typesRegex.MatchString(codeString) || foundDuplicate && duplicatesFlag || untriggeredFlag && hook.LastResponse.Code == 0 {
-				output += fmt.Sprintf("%s", Brown(" [TO BE DESTROYED] "))
-				totalOutput += output + "\n"
-				hooksToDestroy = uniqueAppend(hooksToDestroy, hook.URL)
-				temparray = append(temparray, hook.Config.URL)
-			}
-
-			// Print result
-			fmt.Println(output)
-		}
-
-		// Create newline
-		fmt.Println()
-
-		totalOutput += "\n"
-
-		// Sleep until next API requests
-		time.Sleep(requestDelay)
-	}
-
-	// Return if no hooks to destroy were found
-	if len(hooksToDestroy) == 0 {
-		fmt.Println(Green("Found no hooks to destroy."))
-		return nil
-	}
-
-	// If flag is true, print list of all hooks to be destroyed
-	if listHooksToDestroyFlag {
-		fmt.Printf("%s\n%s\n", Magenta("The following webhooks will be destroyed:\n"), totalOutput)
-	}
-
-	// Confirm with user to go ahead with destroys
-	passPhrase := generatePassPhrase(8)
-	fmt.Printf("%s %sEnter `%s` to continue or anything else to abort.\n", Bold("Do you wish to destroy the selected web hooks? Once done it"), Bold(Red("cannot be reverted.\n")), Brown(passPhrase))
-	var input string
-	fmt.Scanln(&input)
-	if err != nil {
-		printError("Error reading input:", err)
-	}
-	input = strings.TrimSpace(strings.ToUpper(input))
-
-	if input == passPhrase {
-		if err := destroyWebHooks(hooksToDestroy); err != nil {
-			printError("Error destroying all web hooks\n", err)
-		} else {
-			fmt.Println(Green("\nDestruction completed."))
-		}
-	} else {
-		fmt.Println(Green("\nDestruction aborted."))
-	}
-
-	return nil
-}
-
 // Destroys a webhook using a supplied API URL
 // @arg requestURL string
 // @return error
@@ -466,12 +337,140 @@ func destroyWebHooks(webHookURLs []string) error {
 		if err != nil {
 			errorString += fmt.Sprintf("- %s %s : %s", Red("Error deleting web hook"), url, Red(err))
 		}
-		if url == "kjfhkjsdfh" {
-			return nil
-		}
 		if errorString != "" {
 			return errors.New(errorString)
 		}
+	}
+	return nil
+}
+
+// Executes the destroy process of webhooks
+// @arg typesFlag string
+// @arg duplicatesFlag bool
+// @arg untriggeredFlag bool
+// @arg listHooksToDestroyFlag bool
+// @return error
+func executeDestroy(typesFlag string, duplicatesFlag, untriggeredFlag, listHooksToDestroyFlag bool) error {
+	fmt.Println(Bold(Brown("* * * DESTROY * * *")))
+
+	// Validate types
+	types, err := validateTypesFlag(typesFlag)
+	if err != nil {
+		printError("Invalid type options specified:", err)
+	}
+
+	additionalOutput := ""
+	if duplicatesFlag {
+		additionalOutput += "and duplicates "
+	}
+	if untriggeredFlag {
+		additionalOutput += "and untriggered webhooks"
+	}
+	fmt.Printf("%s %s %s\n", Bold(Gray("Webhooks to be destroyed with HTTP status codes matching")), Bold(Brown(types)), Bold(Brown(additionalOutput)))
+
+	typesRegexString := convertTypesToRegex(types)
+
+	fmt.Println(Bold(Gray("Checking GitHub repos for validity of webhooks and tagging those to destroy...\n")))
+
+	// Total output of hooks to destroy
+	var totalOutput string
+	// Array to store ID of all hooks to be destroyed
+	var hooksToDestroy []string
+
+	// For each repo..
+	for _, repo := range reposContainer.Repos {
+		// Array containing indexes of duplicate hooks
+		var duplicateHooksIndexFound []int
+
+		// Print name of repo
+		fmt.Println(Bold(Magenta(repo.Name)))
+		totalOutput += fmt.Sprint(Bold(Magenta(repo.Name)), "\n")
+
+		// Get web hooks
+		webHooks, err := getWebHooks(repo.Name)
+		if err != nil {
+			fmt.Printf("%s %s\n\n", Red("Failed to retrieve web hooks:"), Red(err))
+			continue
+		}
+
+		// Check last_response of each web hook
+		for index, hook := range webHooks.Hooks {
+			output := hook.StatusToString()
+			codeString := strings.ToUpper(strconv.Itoa(hook.LastResponse.Code))
+
+			// Check for duplicates
+			foundDuplicate := false
+			for dIndex, dHook := range webHooks.Hooks {
+				if dIndex == index {
+					continue
+				}
+				if hook.Config.URL != "" && hook.Config.URL == dHook.Config.URL {
+					if !contains(duplicateHooksIndexFound, dIndex) {
+						if duplicatesFlag {
+							hooksToDestroy = uniqueAppend(hooksToDestroy, hook.URL)
+						}
+						duplicateHooksIndexFound = append(duplicateHooksIndexFound, index)
+						foundDuplicate = true
+					}
+				}
+			}
+			if foundDuplicate {
+				output += fmt.Sprintf("%s", Cyan(" [DUPLICATE]"))
+			}
+
+			// Check if codeString matches any types supplied
+			typesRegex, err := regexp.Compile(typesRegexString)
+			if err != nil {
+				fmt.Printf("%s %s\n", Red("Error compiling types regex"), Red(err))
+				continue
+			}
+			if typesRegex.MatchString(codeString) || foundDuplicate && duplicatesFlag || untriggeredFlag && hook.LastResponse.Code == 0 {
+				output += fmt.Sprintf("%s", Brown(" [TO BE DESTROYED]"))
+				totalOutput += output + "\n"
+				hooksToDestroy = uniqueAppend(hooksToDestroy, hook.URL)
+			}
+
+			// Print result
+			fmt.Println(output)
+		}
+
+		// Create newline
+		fmt.Println()
+
+		totalOutput += "\n"
+
+		// Sleep until next API requests
+		time.Sleep(requestDelay)
+	}
+
+	// Return if no hooks to destroy were found
+	if len(hooksToDestroy) == 0 {
+		fmt.Println(Green("Found no hooks to destroy."))
+		return nil
+	}
+
+	// If flag is true, print list of all hooks to be destroyed
+	if listHooksToDestroyFlag {
+		fmt.Printf("%s\n%s\n", Magenta("The following webhooks will be destroyed:\n"), totalOutput)
+	}
+
+	// Confirm with user to go ahead with destroys
+	passPhrase := generatePassPhrase(8)
+	fmt.Printf("%s %sEnter `%s` to continue or anything else to abort.\n", Bold("Do you wish to destroy the selected web hooks? Once done it"), Bold(Red("cannot be reverted.\n")), Brown(passPhrase))
+
+	var input string
+
+	fmt.Scanln(&input)
+	input = strings.TrimSpace(strings.ToUpper(input))
+
+	if input == passPhrase {
+		if err := destroyWebHooks(hooksToDestroy); err != nil {
+			printError("Error destroying all web hooks\n", err)
+		} else {
+			fmt.Println(Green("\nDestruction completed."))
+		}
+	} else {
+		fmt.Println(Green("\nDestruction aborted."))
 	}
 
 	return nil
@@ -536,5 +535,4 @@ func main() {
 	case destroyFlag:
 		executeDestroy(typesFlag, duplicatesFlag, untriggeredFlag, listHooksToDestroyFlag)
 	}
-
 }

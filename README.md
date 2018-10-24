@@ -1,5 +1,5 @@
 # webhookit
-Tool built in Go for verifying the integrity of GitHub web hooks and providing the option to delete web hooks based off of most recent HTTP status code returned.
+Tool built in Go for verifying the integrity of GitHub web hooks and providing the option to delete web hooks based off of multiple parameters.
 
 ## Usage
 - `export WEBHOOKIT_API_KEY=<api-key>` Ensure api key has privileges to modify web hooks in your repositories.
@@ -23,5 +23,5 @@ Tool built in Go for verifying the integrity of GitHub web hooks and providing t
     Include duplicates webhooks when destroying.
 - `-l`
     List hooks to be destroyed before confirmation.
-- `-u`    
+- `-u`  
     Include untriggered webhooks when destroying.
