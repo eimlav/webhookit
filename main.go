@@ -168,14 +168,38 @@ func getWebHooks(repoName string) (WebHooks, error) {
 	return webHooks, nil
 }
 
-// Executes API requests to GitHub based on the options passed in
+// Backups webhooks to a local JSON file
+func backupWebHooks(filepath string, webHooks WebHooks) error {
+	webHooksJSON, err := json.Marshal(webHooks)
+	if err != nil {
+		return err
+	}
+	return ioutil.WriteFile(filepath, webHooksJSON, 0644)
+}
+
+// Executes the backup functionality
 // @return error
-func executeCheck() error {
+func executeBackup(filepath string, webHooks WebHooks) error {
+	if filepath == "" {
+		return nil
+	}
+	err := backupWebHooks(filepath, webHooks)
+	if err != nil {
+		return errors.New(fmt.Sprint(Red("Error backing up webhooks:"), Red(err)))
+	}
+	fmt.Println(fmt.Sprintf("%s %s\n", Magenta("Successfully backed up webhooks to"), Brown(filepath)))
+	return nil
+}
+
+// Executes API requests to GitHub based on the options passed in
+// @arg backupFlag string
+// @return error
+func executeCheck(backupFlag string) error {
 	fmt.Println(Bold(Brown("* * * CHECK * * *")))
 	fmt.Println(Bold(Gray("Checking GitHub repo(s) for validity of webhooks...\n")))
 
 	// Array containing indexes of duplicate hooks
-	//var duplicateHooksIndexFound []int
+	allWebHooks := WebHooks{}
 	// For each repo read in...
 	for _, repo := range reposContainer.Repos {
 		var duplicateHooksIndexFound []int
@@ -188,6 +212,11 @@ func executeCheck() error {
 		if err != nil {
 			fmt.Printf("%s %s\n\n", Red("Failed to retrieve web hooks:"), Red(err))
 			continue
+		}
+
+		// Add webHooks to allWebHooks for backup
+		if backupFlag != "" {
+			allWebHooks.Hooks = append(allWebHooks.Hooks, webHooks.Hooks...)
 		}
 
 		// Check last_response of each web hook
@@ -219,6 +248,11 @@ func executeCheck() error {
 
 		// Sleep until next API requests
 		time.Sleep(requestDelay)
+	}
+
+	// Execution of backup. Backup will only occur if a non-empty backupFlag is present
+	if err := executeBackup(backupFlag, allWebHooks); err != nil {
+		printError("Backup failed:", err)
 	}
 
 	fmt.Println(Green("Check complete."))
@@ -353,8 +387,9 @@ func destroyWebHooks(webHookURLs []string) error {
 // @arg duplicatesFlag bool
 // @arg untriggeredFlag bool
 // @arg listHooksToDestroyFlag bool
+// @arg backupFlag string
 // @return error
-func executeDestroy(typesFlag string, duplicatesFlag, untriggeredFlag, listHooksToDestroyFlag bool) error {
+func executeDestroy(typesFlag string, duplicatesFlag, untriggeredFlag, listHooksToDestroyFlag bool, backupFlag string) error {
 	fmt.Println(Bold(Brown("* * * DESTROY * * *")))
 
 	// Validate types
@@ -376,6 +411,8 @@ func executeDestroy(typesFlag string, duplicatesFlag, untriggeredFlag, listHooks
 
 	fmt.Println(Bold(Gray("Checking GitHub repos for validity of webhooks and tagging those to destroy...\n")))
 
+	// Array containing indexes of duplicate hooks
+	allWebHooks := WebHooks{}
 	// Total output of hooks to destroy
 	var totalOutput string
 	// Array to store ID of all hooks to be destroyed
@@ -395,6 +432,11 @@ func executeDestroy(typesFlag string, duplicatesFlag, untriggeredFlag, listHooks
 		if err != nil {
 			fmt.Printf("%s %s\n\n", Red("Failed to retrieve web hooks:"), Red(err))
 			continue
+		}
+
+		// Add webHooks to allWebHooks for backup
+		if backupFlag != "" {
+			allWebHooks.Hooks = append(allWebHooks.Hooks, webHooks.Hooks...)
 		}
 
 		// Check last_response of each web hook
@@ -458,6 +500,11 @@ func executeDestroy(typesFlag string, duplicatesFlag, untriggeredFlag, listHooks
 		fmt.Printf("%s\n%s\n", Magenta("The following webhooks will be destroyed:\n"), totalOutput)
 	}
 
+	// Execution of backup. Backup will only occur if a non-empty backupFlag is present
+	if err := executeBackup(backupFlag, allWebHooks); err != nil {
+		printError("Backup failed:", err)
+	}
+
 	// Confirm with user to go ahead with destroys
 	passPhrase := generatePassPhrase(8)
 	fmt.Printf("%s %sEnter `%s` to continue or anything else to abort.\n", Bold("Do you wish to destroy the selected web hooks? Once done it"), Bold(Red("cannot be reverted.\n")), Brown(passPhrase))
@@ -497,10 +544,11 @@ func main() {
 		duplicatesFlag         bool
 		untriggeredFlag        bool
 		listHooksToDestroyFlag bool
+		backupFlag             string
 	)
 
 	// Parse options
-	flag.StringVar(&filePath, "f", "", "File path of JSON file containing repos.")
+	flag.StringVar(&filePath, "f", "", "File path of JSON file containing repos. Uses filepath as argument.")
 	flag.StringVar(&repoFlag, "r", "", "A single specified repo using the syntax namespace/repo.")
 	flag.BoolVar(&checkFlag, "c", false, "Check repos for broken webhooks.")
 	flag.BoolVar(&destroyFlag, "d", false, "Destroy broken webhooks.")
@@ -508,6 +556,7 @@ func main() {
 	flag.BoolVar(&duplicatesFlag, "ds", false, "Include duplicates webhooks when destroying.")
 	flag.BoolVar(&untriggeredFlag, "u", false, "Include untriggered webhooks when destroying.")
 	flag.BoolVar(&listHooksToDestroyFlag, "l", false, "List hooks to be destroyed before confirmation.")
+	flag.StringVar(&backupFlag, "b", "", "Backups webhooks to JSON file. Uses filepath as argument.")
 	flag.Parse()
 
 	// Validate options
@@ -535,8 +584,8 @@ func main() {
 	// Execute API requests
 	switch {
 	case checkFlag:
-		executeCheck()
+		executeCheck(backupFlag)
 	case destroyFlag:
-		executeDestroy(typesFlag, duplicatesFlag, untriggeredFlag, listHooksToDestroyFlag)
+		executeDestroy(typesFlag, duplicatesFlag, untriggeredFlag, listHooksToDestroyFlag, backupFlag)
 	}
 }
