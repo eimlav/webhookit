@@ -18,10 +18,10 @@ Tool built in Go for verifying the integrity of GitHub web hooks and providing t
 - `-r <string>`
     A single specified repo using the syntax namespace/repo. Cannot be used along with -filepath.
 - `-t <string>`
-    CSV list of HTTP status code types to destroy e.g. 2XX, 501 e.g. 2XX, 501 (default "3XX,4XX,5XX").
+    CSV list of HTTP status code types to destroy e.g. 2XX, 501 e.g. 2XX, 501 or `none` to disable HTTP status code matching (default "3XX,4XX,5XX").
 - `-ds`
     Include duplicates webhooks when destroying.
 - `-l`
     List hooks to be destroyed before confirmation.
-- `-u`  
+- `-u`
     Include untriggered webhooks when destroying.
