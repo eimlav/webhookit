@@ -232,6 +232,10 @@ func executeCheck() error {
 // @return []string - Contains each type as a string
 // @return error
 func validateTypesFlag(typesFlag string) ([]string, error) {
+	if strings.ToLower(typesFlag) == "none" {
+		return []string{"N/A"}, nil
+	}
+
 	var failedTypes []string
 	r, _ := regexp.Compile("\\d{3}|\\d[xX][xX]|\\d\\d[xX]")
 	types := strings.Split(typesFlag, ",")
@@ -500,7 +504,7 @@ func main() {
 	flag.StringVar(&repoFlag, "r", "", "A single specified repo using the syntax namespace/repo.")
 	flag.BoolVar(&checkFlag, "c", false, "Check repos for broken webhooks.")
 	flag.BoolVar(&destroyFlag, "d", false, "Destroy broken webhooks.")
-	flag.StringVar(&typesFlag, "t", "3XX,4XX,5XX", "CSV list of HTTP status code types to destroy e.g. 2XX, 501.")
+	flag.StringVar(&typesFlag, "t", "3XX,4XX,5XX", "CSV list of HTTP status code types to destroy e.g. 2XX, 501 or 'none' to disable HTTP status code matching")
 	flag.BoolVar(&duplicatesFlag, "ds", false, "Include duplicates webhooks when destroying.")
 	flag.BoolVar(&untriggeredFlag, "u", false, "Include untriggered webhooks when destroying.")
 	flag.BoolVar(&listHooksToDestroyFlag, "l", false, "List hooks to be destroyed before confirmation.")
