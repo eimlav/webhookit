@@ -7,15 +7,21 @@ Tool built in Go for verifying the integrity of GitHub web hooks and providing t
 - `./webhookit <action> [options]`
 
 ### Actions
-- `-check`
+- `--c`
     Check repos for broken webhooks. Cannot be used along with -destroy.
-- `-destroy`
+- `--d`
     Destroy broken webhooks. Cannot be used along with -check.
 
 ### Options
-- `-filepath <string>`
+- `-f <string>`
     File path of JSON file containing repos. Cannot be used along with -repo.
-- `-repo <string>`
+- `-r <string>`
     A single specified repo using the syntax namespace/repo. Cannot be used along with -filepath.
-- `-types <string>`
-    CSV list of HTTP status code types to destroy e.g. 2XX, 501 e.g. 2XX, 501 (default "3XX,4XX,5XX")
+- `-t <string>`
+    CSV list of HTTP status code types to destroy e.g. 2XX, 501 e.g. 2XX, 501 (default "3XX,4XX,5XX").
+- `-ds`
+    Include duplicates webhooks when destroying.
+- `-l`
+    List hooks to be destroyed before confirmation.
+- `-u`    
+    Include untriggered webhooks when destroying.
