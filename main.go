@@ -6,6 +6,7 @@ import (
 	"flag"
 	"fmt"
 	"io/ioutil"
+	"math/rand"
 	"net/http"
 	"os"
 	"regexp"
@@ -95,7 +96,7 @@ func (w WebHook) StatusToString() (status string) {
 func retrieveRepos(filePath string) {
 	jsonFile, err := os.Open(filePath)
 	if err != nil {
-		printError("Issue opening repos file", err)
+		printError("Issue opening repos file:", err)
 	}
 	defer jsonFile.Close()
 
@@ -217,6 +218,16 @@ func convertTypesToRegex(types []string) string {
 	return strings.Join(newTypes, "|")
 }
 
+func generatePassPhrase(length int) string {
+	bytes := make([]byte, length)
+	rand.Seed(time.Now().UTC().UnixNano())
+
+	for i := 0; i < length; i++ {
+		bytes[i] = byte(65 + rand.Intn(25))
+	}
+	return string(bytes)
+}
+
 func executeDestroy(typesFlag string) error {
 	fmt.Println(Bold(Brown("* * * DESTROY * * *")))
 
@@ -263,14 +274,20 @@ func executeDestroy(typesFlag string) error {
 		}
 
 		// Create newline
-		fmt.Println("\n")
+		fmt.Println()
 
 		// Sleep until next API requests
 		time.Sleep(requestDelay)
 	}
 
+	if len(hooksToDestroy) == 0 {
+		fmt.Println(Green("Found no hooks to destroy."))
+		return nil
+	}
+
 	// Confirm with user to go ahead with destroys
-	fmt.Println("Do you wish to destroy the selected web hooks? Once done this cannot be reverted.\nY / N")
+	passPhrase := generatePassPhrase(8)
+	fmt.Printf("%s %sEnter `%s` to continue or anything else to abort.\n", Bold("Do you wish to destroy the selected web hooks? Once done this is done it"), Bold(Red("cannot be reverted.\n")), passPhrase)
 	var input string
 	fmt.Scanln(&input)
 	if err != nil {
@@ -278,7 +295,7 @@ func executeDestroy(typesFlag string) error {
 	}
 	input = strings.TrimSpace(strings.ToUpper(input))
 
-	if input == "Y" {
+	if input == passPhrase {
 		if err := destroyWebHooks(hooksToDestroy); err != nil {
 			printError("Error destroying all web hooks\n", err)
 		} else {
@@ -349,10 +366,10 @@ func main() {
 
 	// Parse options
 	flag.StringVar(&filePath, "filepath", "", "File path of JSON file containing repos")
-	flag.StringVar(&repoFlag, "repo", "", "A single specified repo")
+	flag.StringVar(&repoFlag, "repo", "", "A single specified repo using the syntax namespace/repo")
 	flag.BoolVar(&checkFlag, "check", false, "Check repos for broken webhooks")
 	flag.BoolVar(&destroyFlag, "destroy", false, "Destroy broken webhooks")
-	flag.StringVar(&typesFlag, "types", "3XX,4XX,5XX", "HTTP status code types to destroy e.g. 2XX, 501")
+	flag.StringVar(&typesFlag, "types", "3XX,4XX,5XX", "CSV list of HTTP status code types to destroy e.g. 2XX, 501")
 	flag.Parse()
 
 	// Validate options
