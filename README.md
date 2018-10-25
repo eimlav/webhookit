@@ -28,6 +28,9 @@ Tool built in Go for verifying the integrity of GitHub web hooks and providing t
 - `-u`
     Include untriggered webhooks when destroying.
 
+### Encountering duplicates
+With the -ds option specified, a dialog will appear on encountering a duplicate. This shows a diff of all the duplicates found for that particular webhook and then allows you to choose which webhooks to destroy, through the use of a CSV list.
+
 ### Repos JSON file syntax
 ```
 {
