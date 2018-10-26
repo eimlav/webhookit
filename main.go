@@ -70,6 +70,33 @@ type WebHook struct {
 	} `json:"last_response"`
 }
 
+// HookWrapper is used to track webhooks in the executeDestroy method
+type HookWrapper struct {
+	Hook        WebHook
+	Duplicate   bool
+	DestroySkip bool
+	Destroy     bool
+	Code        string
+}
+
+// canDestroy returns whether an item can be destroyed
+// @return bool
+func (d HookWrapper) canDestroy() bool {
+	return d.Destroy && !d.DestroySkip
+}
+
+// ToString prints the string of a HookWrapper
+func (d HookWrapper) ToString() string {
+	output := ""
+	if d.Duplicate {
+		output += fmt.Sprint(Cyan(" [DUPLICATE]"))
+	}
+	if d.canDestroy() {
+		output += fmt.Sprint(Brown(" [TO BE DESTROYED]"))
+	}
+	return d.Hook.StatusToString() + output
+}
+
 // StatusToString returns a formatted string of the status of the web hook
 func (w WebHook) StatusToString() (status string) {
 	// Required for edge cases where w.Config.URL is empty
@@ -196,18 +223,19 @@ func executeBackup(filepath string, webHooks WebHooks) error {
 // @arg backupFlag string
 // @return error
 func executeCheck(backupFlag string) error {
-	fmt.Println(Bold(Brown("* * * CHECK * * *")))
+	// Print title
+	title := fmt.Sprintf("%s\n%s\n%s\n", Bold(Gray("* * * * * * * * * * * * * * * * * * * *")), Bold(Brown("             C H E C K")), Bold(Gray("* * * * * * * * * * * * * * * * * * * *")))
+	fmt.Println(title)
+
 	fmt.Println(Bold(Gray("Checking GitHub repo(s) for validity of webhooks...\n")))
 
 	// Array containing indexes of duplicate hooks
 	allWebHooks := WebHooks{}
-	// For each repo read in...
+	// Total output of hooks
+	var totalOutput string
+
+	// For each repo...
 	for _, repo := range reposContainer.Repos {
-		var duplicateHooksIndexFound []int
-
-		// Print name of repo
-		fmt.Println(Bold(Magenta(repo.Name)))
-
 		// Get web hooks
 		webHooks, err := getWebHooks(repo.Name)
 		if err != nil {
@@ -220,41 +248,54 @@ func executeCheck(backupFlag string) error {
 			allWebHooks.Hooks = append(allWebHooks.Hooks, webHooks.Hooks...)
 		}
 
-		// Check last_response of each web hook
-		for index, hook := range webHooks.Hooks {
-			output := hook.StatusToString()
+		// Convert WebHooks to map of HookWrappers
+		hooksMap := make(map[string]*HookWrapper, len(webHooks.Hooks))
+		for _, hook := range webHooks.Hooks {
+			hooksMap[hook.URL] = &HookWrapper{
+				Hook: hook,
+				Code: strings.ToUpper(strconv.Itoa(hook.LastResponse.Code)),
+			}
+		}
+		// For each hook...
+		for index := range hooksMap {
+			currentItem := hooksMap[index].Hook.URL
 
-			// Check for duplicates
-			foundDuplicate := false
-			for dIndex, dHook := range webHooks.Hooks {
-				if dIndex == index {
+			for dIndex := range hooksMap {
+				iterateItem := hooksMap[dIndex].Hook.URL
+				// Skip the same hook or an item already marked as duplicate
+				if currentItem == iterateItem || hooksMap[iterateItem].Duplicate == true {
 					continue
 				}
-				if hook.Config.URL != "" && hook.Config.URL == dHook.Config.URL {
-					if !contains(duplicateHooksIndexFound, dIndex) {
-						duplicateHooksIndexFound = append(duplicateHooksIndexFound, index)
-						foundDuplicate = true
-					}
+
+				// Check if hook is a duplicate
+				if hooksMap[currentItem].Hook.Config.URL != "" && (hooksMap[currentItem].Hook.Config.URL == hooksMap[iterateItem].Hook.Config.URL) {
+					// Mark hooks as duplicate
+					hooksMap[currentItem].Duplicate = true
+					hooksMap[iterateItem].Duplicate = true
 				}
 			}
-			if foundDuplicate {
-				output += fmt.Sprintf("%s", Cyan(" [DUPLICATE] "))
-			}
-
-			fmt.Println(output)
 		}
 
-		// Create newline
-		fmt.Println()
+		// Print name of repo
+		printName := fmt.Sprintf("%s\n\n", Bold(Magenta(repo.Name)))
+		totalOutput += printName
 
-		// Sleep until next API requests
-		time.Sleep(requestDelay)
+		// Append each hook string ot totalOutput
+		for _, hook := range hooksMap {
+			totalOutput += hook.ToString() + "\n"
+		}
+
+		// Newline to space out each repo
+		totalOutput += "\n"
 	}
 
 	// Execution of backup. Backup will only occur if a non-empty backupFlag is present
 	if err := executeBackup(backupFlag, allWebHooks); err != nil {
 		printError("Backup failed:", err)
 	}
+
+	// Print totalOutput
+	fmt.Println(totalOutput)
 
 	fmt.Println(Green("Check complete."))
 
@@ -404,28 +445,28 @@ func compareStringArrays(arrayOne, arrayTwo []string) bool {
 // @arg hookOne WebHook
 // @arg hookTwo WebHook
 // @return error
-func duplicateDiff(destroyItems ...*DestroyItem) error {
+func duplicateDiff(HookWrappers ...*HookWrapper) error {
 	// Must have at least two hooks to compare
-	if len(destroyItems) < 1 {
+	if len(HookWrappers) < 1 {
 		return nil
 	}
 
 	fmt.Println(Bold(Magenta("\n* * * * * * * * * * *\n   DUPLICATE FOUND\n* * * * * * * * * * *\n")))
 
 	// Display diff of each WebHook
-	hookRefs := make([]reflect.Value, len(destroyItems))
-	for index, destroyItem := range destroyItems {
-		hookRefs[index] = reflect.ValueOf(destroyItem.Hook)
+	hookRefs := make([]reflect.Value, len(HookWrappers))
+	for index, HookWrapper := range HookWrappers {
+		hookRefs[index] = reflect.ValueOf(HookWrapper.Hook)
 	}
 
 	// Gather diffs of each duplicate
 	fieldCount := hookRefs[0].NumField()
 	outputs := make([]string, fieldCount)
-	colourBool := false
 
 	// For each field of WebHook...
 	for fieldIndex := 0; fieldIndex < fieldCount; fieldIndex++ {
 		// Build output string by iterating over field of each item
+		colourBool := true
 
 		// Add name of field
 		outputs[fieldIndex] = fmt.Sprintf("    %s\n", Bold(Gray(hookRefs[0].Type().Field(fieldIndex).Name)))
@@ -495,7 +536,7 @@ func duplicateDiff(destroyItems ...*DestroyItem) error {
 
 		// Set destroy of each hook
 		for _, hookIndex := range intSplitInput {
-			destroyItems[hookIndex].Destroy = true
+			HookWrappers[hookIndex].Destroy = true
 		}
 
 		// Print confirmation message and exit input loop
@@ -506,38 +547,11 @@ func duplicateDiff(destroyItems ...*DestroyItem) error {
 	return nil
 }
 
-// Mark an array of DestroyItems as Duplicated
-func markDuplicates(destroyItems ...*DestroyItem) {
-	for _, destroyItem := range destroyItems {
-		destroyItem.Duplicate = true
+// Mark an array of HookWrappers as Duplicated
+func markDuplicates(HookWrappers ...*HookWrapper) {
+	for _, HookWrapper := range HookWrappers {
+		HookWrapper.Duplicate = true
 	}
-}
-
-// DestroyItem is used to track webhooks in the executeDestroy method
-type DestroyItem struct {
-	Hook        WebHook
-	Duplicate   bool
-	DestroySkip bool
-	Destroy     bool
-	Code        string
-}
-
-// canDestroy returns whether an item can be destroyed
-// @return bool
-func (d DestroyItem) canDestroy() bool {
-	return d.Destroy && !d.DestroySkip
-}
-
-// ToString prints the string of a DestroyItem
-func (d DestroyItem) ToString() string {
-	output := ""
-	if d.Duplicate {
-		output += fmt.Sprint(Cyan(" [DUPLICATE]"))
-	}
-	if d.canDestroy() {
-		output += fmt.Sprint(Brown(" [TO BE DESTROYED]"))
-	}
-	return d.Hook.StatusToString() + output
 }
 
 // Executes the destroy process of webhooks
@@ -548,7 +562,9 @@ func (d DestroyItem) ToString() string {
 // @arg backupFlag string
 // @return error
 func executeDestroy(typesFlag string, duplicatesFlag, untriggeredFlag, listHooksToDestroyFlag bool, backupFlag string) error {
-	fmt.Println(Bold(Brown("* * * DESTROY * * *")))
+	// Print title
+	title := fmt.Sprintf("%s\n%s\n%s\n", Bold(Gray("* * * * * * * * * * * * * * * * * * * *")), Bold(Brown("            D E S T R O Y")), Bold(Gray("* * * * * * * * * * * * * * * * * * * *")))
+	fmt.Println(title)
 
 	// Validate types
 	types, err := validateTypesFlag(typesFlag)
@@ -571,8 +587,10 @@ func executeDestroy(typesFlag string, duplicatesFlag, untriggeredFlag, listHooks
 
 	// Array containing indexes of duplicate hooks
 	allWebHooks := WebHooks{}
-	// Total output of hooks to destroy
+	// Total output of hooks
 	var totalOutput string
+	// Total output of hooks to destroy
+	var totalDestroyOutput string
 	// Array to store ID of all hooks to be destroyed
 	var hooksToDestroy []string
 
@@ -590,10 +608,10 @@ func executeDestroy(typesFlag string, duplicatesFlag, untriggeredFlag, listHooks
 			allWebHooks.Hooks = append(allWebHooks.Hooks, webHooks.Hooks...)
 		}
 
-		// Convert WebHooks to map of DestroyItems
-		hooksMap := make(map[string]*DestroyItem, len(webHooks.Hooks))
+		// Convert WebHooks to map of HookWrappers
+		hooksMap := make(map[string]*HookWrapper, len(webHooks.Hooks))
 		for _, hook := range webHooks.Hooks {
-			hooksMap[hook.URL] = &DestroyItem{
+			hooksMap[hook.URL] = &HookWrapper{
 				Hook: hook,
 				Code: strings.ToUpper(strconv.Itoa(hook.LastResponse.Code)),
 			}
@@ -601,8 +619,8 @@ func executeDestroy(typesFlag string, duplicatesFlag, untriggeredFlag, listHooks
 		// For each hook...
 		for index := range hooksMap {
 			currentItem := hooksMap[index].Hook.URL
-			var duplicateDestroyItems []*DestroyItem
-			duplicateDestroyItems = append(duplicateDestroyItems, hooksMap[index])
+			var duplicateHookWrappers []*HookWrapper
+			duplicateHookWrappers = append(duplicateHookWrappers, hooksMap[index])
 
 			for dIndex := range hooksMap {
 				iterateItem := hooksMap[dIndex].Hook.URL
@@ -612,19 +630,19 @@ func executeDestroy(typesFlag string, duplicatesFlag, untriggeredFlag, listHooks
 				}
 
 				// Check if hook is a duplicate
-				if currentItem != "" && (hooksMap[currentItem].Hook.Config.URL == hooksMap[iterateItem].Hook.Config.URL) {
+				if hooksMap[currentItem].Hook.Config.URL != "" && (hooksMap[currentItem].Hook.Config.URL == hooksMap[iterateItem].Hook.Config.URL) {
 					// Mark hooks as duplicate
 					hooksMap[currentItem].Duplicate = true
 					hooksMap[iterateItem].Duplicate = true
 
 					// Add iterate hook to duplicate hooks
-					duplicateDestroyItems = append(duplicateDestroyItems, hooksMap[iterateItem])
+					duplicateHookWrappers = append(duplicateHookWrappers, hooksMap[iterateItem])
 				}
 			}
 
 			// Perform diff if duplicates found
-			if len(duplicateDestroyItems) > 1 && duplicatesFlag {
-				err := duplicateDiff(duplicateDestroyItems...)
+			if len(duplicateHookWrappers) > 1 && duplicatesFlag {
+				err := duplicateDiff(duplicateHookWrappers...)
 				if err != nil {
 					printError("Error occured generating duplicate diff:", err)
 				}
@@ -644,31 +662,38 @@ func executeDestroy(typesFlag string, duplicatesFlag, untriggeredFlag, listHooks
 		// Print name of repo
 		printName := fmt.Sprintf("%s\n\n", Bold(Magenta(repo.Name)))
 		totalOutput += printName
-		fmt.Print(printName)
+		totalDestroyOutput += printName
 
 		// Determine which hooks to destroy then output all results
 		for _, hook := range hooksMap {
 			if hook.canDestroy() {
-				totalOutput += fmt.Sprint(hook.Hook.URL, "\n")
+				totalDestroyOutput += fmt.Sprint(hook.Hook.URL, "\n")
 				hooksToDestroy = append(hooksToDestroy, hook.Hook.URL)
 			}
-			fmt.Println(hook.ToString())
+			//fmt.Println(hook.ToString())
+			totalOutput += hook.ToString() + "\n"
 		}
+
+		// Newline to space out each repo
 		totalOutput += "\n"
+		totalDestroyOutput += "\n"
 	}
+
+	// Print totalOutput
+	fmt.Println(totalOutput)
 
 	// Return if no hooks to destroy were found
 	hookCount := len(hooksToDestroy)
 	if hookCount == 0 {
-		fmt.Println(Green("\nFound no hooks to destroy."))
+		fmt.Println(Green("Found no hooks to destroy."))
 		return nil
 	} else {
-		fmt.Println(fmt.Sprintf("\n%s %d %s\n", Bold(Gray("Found")), Bold(Brown(hookCount)), Bold(Gray("hooks to destroy"))))
+		fmt.Println(fmt.Sprintf("%s %d %s\n", Bold(Gray("Found")), Bold(Brown(hookCount)), Bold(Gray("hooks to destroy"))))
 	}
 
 	// If flag is true, print list of all hooks to be destroyed
 	if listHooksToDestroyFlag {
-		fmt.Printf("%s\n%s\n", Magenta("The following webhooks will be destroyed:\n"), totalOutput)
+		fmt.Printf("%s\n%s\n", Magenta("The following webhooks will be destroyed:\n"), totalDestroyOutput)
 	}
 
 	// Execution of backup. Backup will only occur if a non-empty backupFlag is present
