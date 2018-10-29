@@ -662,21 +662,27 @@ func executeDestroy(typesFlag string, duplicatesFlag, untriggeredFlag, listHooks
 		// Print name of repo
 		printName := fmt.Sprintf("%s\n\n", Bold(Magenta(repo.Name)))
 		totalOutput += printName
-		totalDestroyOutput += printName
 
 		// Determine which hooks to destroy then output all results
+		includeTitle := false
 		for _, hook := range hooksMap {
 			if hook.canDestroy() {
-				totalDestroyOutput += fmt.Sprint(hook.Hook.URL, "\n")
+				if !includeTitle {
+					totalDestroyOutput += "\n" + printName
+					includeTitle = true
+				}
+				if hook.Hook.Config.URL == "" {
+					totalDestroyOutput += fmt.Sprintf("%s => %s\n", Bold(Gray(hook.Hook.URL)), Brown(hook.Hook.Name))
+				} else {
+					totalDestroyOutput += fmt.Sprintf("%s => %s\n", Bold(Gray(hook.Hook.URL)), Brown(hook.Hook.Config.URL))
+				}
 				hooksToDestroy = append(hooksToDestroy, hook.Hook.URL)
 			}
-			//fmt.Println(hook.ToString())
 			totalOutput += hook.ToString() + "\n"
 		}
 
 		// Newline to space out each repo
 		totalOutput += "\n"
-		totalDestroyOutput += "\n"
 	}
 
 	// Print totalOutput
@@ -691,14 +697,14 @@ func executeDestroy(typesFlag string, duplicatesFlag, untriggeredFlag, listHooks
 		fmt.Println(fmt.Sprintf("%s %d %s\n", Bold(Gray("Found")), Bold(Brown(hookCount)), Bold(Gray("hooks to destroy"))))
 	}
 
-	// If flag is true, print list of all hooks to be destroyed
-	if listHooksToDestroyFlag {
-		fmt.Printf("%s\n%s\n", Magenta("The following webhooks will be destroyed:\n"), totalDestroyOutput)
-	}
-
 	// Execution of backup. Backup will only occur if a non-empty backupFlag is present
 	if err := executeBackup(backupFlag, allWebHooks); err != nil {
 		printError("Backup failed:", err)
+	}
+
+	// If flag is true, print list of all hooks to be destroyed
+	if listHooksToDestroyFlag {
+		fmt.Printf("%s\n%s\n", Magenta("The following webhooks will be destroyed:\n"), totalDestroyOutput)
 	}
 
 	// Confirm with user to go ahead with destroys
